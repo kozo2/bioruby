@@ -10,6 +10,12 @@ matrix:
   include:
     - rvm: 2.5.3
       gemfile: Gemfile
+    - rvm: 2.4.1
+      gemfile: Gemfile
+    - rvm: 2.3.4
+      gemfile: Gemfile
+    - rvm: 2.2.7
+      gemfile: Gemfile
 
 # uncomment this line if your project needs to run something other than `rake`:
 # script: bundle exec rspec spec
