@@ -9,5 +9,5 @@ gem "test-unit"
 
 group :development do
   gem 'rubocop', require: false
-  gem 'rbs', require: false
+  gem 'rbs'
 end
