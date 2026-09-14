@@ -69,8 +69,13 @@ module Common
   end
 
   # Returns the second part of the VERSION record as a "GI:#######" String.
+  # Note that NCBI/DDBJ has discontinued assigning GI numbers to newly
+  # registered entries since 2016, so newer VERSION records only have
+  # the "ACCESSION.VERSION" part and no GI part. In this case, nil is
+  # returned.
   def gi
-    versions.last
+    v = versions.last
+    v && v[/\AGI\:/] ? v : nil
   end
 
 
@@ -89,6 +94,27 @@ module Common
   # SEGMENT -- Returns contents of the SEGMENT record as a "m/n" form String.
   def segment
     @data['SEGMENT'] ||= fetch('SEGMENT').scan(/\d+/).join("/")
+  end
+
+
+  # DBLINK -- Returns contents of the DBLINK record as a Hash of the
+  # database name (String) and an Array of the entry IDs (Array of
+  # String). Note that DBLINK is a relatively new field introduced by
+  # NCBI/DDBJ after GenBank release 126.0 to store links to BioProject,
+  # BioSample, Sequence Read Archive, and so on, and does not exist in
+  # older entries. In this case, an empty Hash is returned.
+  def dblink
+    unless @data['DBLINK_HASH']
+      hash = {}
+      lines_fetch('DBLINK').each do |line|
+        db, ids = line.split(/\s*:\s*/, 2)
+        next unless db && ids
+
+        hash[db] = ids.split(/,\s*/)
+      end
+      @data['DBLINK_HASH'] = hash
+    end
+    @data['DBLINK_HASH']
   end
 
 
@@ -268,6 +294,18 @@ module Common
       @data['SEQUENCE'] = seqstr.tr("0-9 \t\n\r\/", '')
     end
     @data['ORIGIN']
+  end
+
+
+  # CONTIG -- Returns contents of the CONTIG record as a String.
+  # Note that many recent genome assembly entries (e.g. WGS scaffolds
+  # and chromosome-level RefSeq records) do not embed the sequence
+  # itself in an ORIGIN record, and instead describe it as a join of
+  # other entries in a CONTIG record. In this case, origin/seq return
+  # an empty sequence while contig returns the assembly instruction
+  # string (e.g. "join(CP009273.1:1..233524,gap(100),...)").
+  def contig
+    field_fetch('CONTIG')
   end
 
 

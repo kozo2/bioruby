@@ -20,10 +20,8 @@ require 'bio/io/togows'
 require 'test/unit'
 
 module Bio
-
   # unit test for Bio::TogoWS::REST
   class TestTogoWSREST < Test::Unit::TestCase
-
     def setup
       @togows = Bio::TogoWS::REST.new
     end
@@ -44,26 +42,24 @@ module Bio
     def test_internal_http
       assert_kind_of(Net::HTTP, @togows.internal_http)
     end
-
-  end #class TestTogoWSREST
+  end # class TestTogoWSREST
 
   # unit test for Bio::TogoWS::REST private methods
   class TestTogoWSRESTprivate < Test::Unit::TestCase
-
     def setup
       @togows = Bio::TogoWS::REST.new
     end
 
     def test_make_path
       a_and_q = {
-        '/ab/cde/fghi' => [ 'ab', 'cde', 'fghi' ],
+        '/ab/cde/fghi' => %w[ab cde fghi],
         '/a+b/a%2Bb/a%2Fb/a%26b/a%3Bb/a%2Cb/a%3Bb' =>
-        [ 'a b', 'a+b', 'a/b', 'a&b', 'a;b', 'a,b', 'a;b' ],
+        ['a b', 'a+b', 'a/b', 'a&b', 'a;b', 'a,b', 'a;b'],
         '/123,456/789%2C012,&345' =>
-        [ '123', :",", '456', '789,012', :",", :"&", '345' ]
+        ['123', :',', '456', '789,012', :',', :&, '345']
       }
       count = 0
-      a_and_q.each do |k,v|
+      a_and_q.each do |k, v|
         assert_equal(k, @togows.instance_eval { make_path(v) })
         count += 1
       end
@@ -72,20 +68,17 @@ module Bio
 
     def test_prepare_return_value
       dummyclass = Struct.new(:code, :body)
-      dummy200 = dummyclass.new("200", "this is test")
-      assert_equal("this is test",
+      dummy200 = dummyclass.new('200', 'this is test')
+      assert_equal('this is test',
                    @togows.instance_eval { prepare_return_value(dummy200) })
-      dummy404 = dummyclass.new("404", "not found")
+      dummy404 = dummyclass.new('404', 'not found')
       assert_equal(nil,
                    @togows.instance_eval { prepare_return_value(dummy404) })
     end
-
-  end #class TestTogoWSRESTprivate
-
+  end # class TestTogoWSRESTprivate
 
   # unit test for Bio::TogoWS::REST class methods
   class TestTogoWSRESTclassMethod < Test::Unit::TestCase
-
     def test_new
       assert_instance_of(Bio::TogoWS::REST, Bio::TogoWS::REST.new)
     end
@@ -107,6 +100,24 @@ module Bio
       assert_equal('localhost', http.address)
       assert_equal(1234, http.port)
       assert_equal('/test/', t.instance_eval { @pathbase })
+    end
+
+    def test_new_default_uses_https
+      t = Bio::TogoWS::REST.new
+      assert_equal(true, t.internal_http.use_ssl?)
+    end
+
+    def test_new_with_https_uri_string
+      t = Bio::TogoWS::REST.new('https://localhost:1234/test')
+      http = t.internal_http
+      assert_equal(true, http.use_ssl?)
+      assert_equal('localhost', http.address)
+      assert_equal(1234, http.port)
+    end
+
+    def test_new_with_http_uri_string
+      t = Bio::TogoWS::REST.new('http://localhost:1234/test')
+      assert_equal(false, t.internal_http.use_ssl?)
     end
 
     def test_entry
@@ -132,8 +143,7 @@ module Bio
     def test_search_database_list
       assert_respond_to(Bio::TogoWS::REST, :search_database_list)
     end
-
-  end #class TestTogoWSRESTclassMethod
+  end # class TestTogoWSRESTclassMethod
 
   # dummy class for testing Bio::TogoWS::AccessWait
   class DummyAccessWait
@@ -145,7 +155,7 @@ module Bio
     def setup
       @obj = DummyAccessWait.new
     end
-    
+
     def test_togows_access_wait
       assert_kind_of(Numeric, @obj.instance_eval { togows_access_wait })
 
@@ -155,10 +165,9 @@ module Bio
     end
 
     def test_reset_togows_access_wait
-      assert_nothing_raised {
+      assert_nothing_raised do
         @obj.instance_eval { reset_togows_access_wait }
-      }
+      end
     end
-  end #class TestTogoWSAccessWait
-
-end #module Bio
+  end # class TestTogoWSAccessWait
+end # module Bio

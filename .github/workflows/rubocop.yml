@@ -23,6 +23,5 @@ jobs:
           ruby-version: '3.2'   # adjust to match your project
           bundler-cache: true
 
-
       - name: Run RuboCop
         run: bundle exec rubocop
