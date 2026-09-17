@@ -44,6 +44,57 @@ class UniProtKB < EMBLDB
   @@entry_regrexp = /[A-Z0-9]{1,4}_[A-Z0-9]{1,5}/
   @@data_class = ["STANDARD", "PRELIMINARY"]
 
+  #--
+  # Since around UniProtKB release 2015_XX, many fields (GN, OX, RN, RC,
+  # DE, ...) that are populated by automatic rule-based annotation
+  # (HAMAP, SAAS, ...) carry an inline evidence tag, e.g.:
+  #   GN   Name=S {ECO:0000255|HAMAP-Rule:MF_04099}; ORFNames=2;
+  #   OX   NCBI_TaxID=1410910 {ECO:0000313|EMBL:EWU88764.1};
+  #   RN   [1] {ECO:0000313|EMBL:EWU88764.1}
+  #   RC   STRAIN=F31094 {ECO:0000313|EMBL:EWU88764.1};
+  #   DE   RecName: Full=Spike glycoprotein {ECO:0000255|HAMAP-Rule:MF_04099};
+  # This kind of tag has become common in current (2023 and later)
+  # UniProtKB entries. These helper methods strip it so that accessors
+  # keep returning plain values as before, as is already the case for
+  # entries without such tags.
+  #++
+
+  # (private) removes a trailing UniProtKB evidence tag such as
+  # " {ECO:0000255|HAMAP-Rule:MF_04099}" from the end of +str+.
+  # Returns +str+ unmodified if no evidence tag is present.
+  def strip_evidence_tag(str)
+    str.to_s.sub(/[ \t]*\{[^{}]*\}\s*\z/, '')
+  end
+  private :strip_evidence_tag
+
+  # (private) splits +str+ on +sep+ (a literal String, default: comma),
+  # ignoring occurrences of +sep+ that are inside a UniProtKB evidence
+  # tag ("{...}"), then strips a trailing evidence tag from each token.
+  def split_outside_evidence_tag(str, sep = ',')
+    str.split(/#{Regexp.escape(sep)}(?![^{]*\})/)
+       .map { |e| strip_evidence_tag(e.strip) }
+  end
+  private :split_outside_evidence_tag
+
+  # (private) returns every UniProtKB evidence entry found anywhere in
+  # +str+, as an Array of unique [ eco_code, source ] pairs, e.g.
+  # [ "ECO:0000256", "ARBA:ARBA00041009" ]. +source+ is nil when the
+  # evidence entry has no source reference (e.g. plain "ECO:0000305").
+  #
+  # A single evidence tag ("{...}") may bundle two or more
+  # comma-separated evidence entries, e.g.
+  #   {ECO:0000313|Ensembl:ENSP00000382340, ECO:0000313|Proteomes:UP000005640}
+  # each of which becomes its own pair in the returned Array.
+  #
+  # Returns an empty Array if +str+ has no evidence tag.
+  def evidence_tags_in(str)
+    str.to_s.scan(/\{([^{}]*)\}/).flatten
+       .flat_map { |tag| tag.split(/,\s*/) }
+       .uniq
+       .map { |entry| entry.split('|', 2).values_at(0, 1) }
+  end
+  private :evidence_tags_in
+
   # returns a Hash of the ID line.
   #
   # returns a content (Int or String) of the ID line by a given key.
@@ -172,6 +223,22 @@ class UniProtKB < EMBLDB
   #
   # Return array containing array.
   #
+  # Each [ subcat, desc ] pair may become a 3-element
+  # [ subcat, desc, evidence ] array when the corresponding value in
+  # the DE line carries an inline UniProtKB evidence tag such as
+  # " {ECO:0000256|ARBA:ARBA00041009}"; +evidence+ is then an Array of
+  # [ eco_code, source_or_nil ] pairs (see #evidence_tags_in). e.g.:
+  #   DE   RecName: Full=Multidrug resistance-associated protein 1
+  #            {ECO:0000256|ARBA:ARBA00041009};
+  #            EC=7.6.2.2 {ECO:0000256|ARBA:ARBA00012191};
+  # becomes:
+  #   [ "RecName",
+  #     [ "Full", "Multidrug resistance-associated protein 1",
+  #       [ [ "ECO:0000256", "ARBA:ARBA00041009" ] ] ],
+  #     [ "EC", "7.6.2.2", [ [ "ECO:0000256", "ARBA:ARBA00012191" ] ] ] ]
+  # The pair stays a 2-element array when no evidence tag is present,
+  # so entries without evidence tags keep the pre-existing structure.
+  #
   # http://www.uniprot.org/docs/sp_news.htm
   def parse_DE_line_rel14(str)
     # Returns if it is not the new format since Rel.14
@@ -214,12 +281,16 @@ class UniProtKB < EMBLDB
         subcat = $1
         desc = $2
         desc.sub!(/\;\s*\z/, '')
+        evidence = evidence_tags_in(desc)
+        desc = strip_evidence_tag(desc)
         unless cur
           warn "Warning: unknown category in DE line: #{line.inspect}"
           cur = [ '' ]
           ret.push cur
         end
-        cur.push [ subcat, desc ]
+        pair = [ subcat, desc ]
+        pair.push(evidence) unless evidence.empty?
+        cur.push pair
       else
         warn "Warning: skipped DE line description in unknown format: #{line.inspect}"
       end
@@ -417,15 +488,17 @@ class UniProtKB < EMBLDB
       record.each_line(';') do |element|
         case element
         when /Name=/ then
-          gene_hash[:name] = $'[0..-2]
+          gene_hash[:name] = strip_evidence_tag($'[0..-2])
         when /Synonyms=/ then
-          gene_hash[:synonyms] = $'[0..-2].split(/\s*,\s*/)
+          gene_hash[:synonyms] = split_outside_evidence_tag($'[0..-2])
         when /OrderedLocusNames=/ then
-          gene_hash[:loci] = $'[0..-2].split(/\s*,\s*/)
+          gene_hash[:loci] = split_outside_evidence_tag($'[0..-2])
         when /ORFNames=/ then
-          gene_hash[:orfs] = $'[0..-2].split(/\s*,\s*/)
+          gene_hash[:orfs] = split_outside_evidence_tag($'[0..-2])
         end
       end
+      evidence = evidence_tags_in(record)
+      gene_hash[:evidence] = evidence unless evidence.empty?
       @data['GN'] << gene_hash
     end
     return @data['GN']
@@ -517,7 +590,9 @@ class UniProtKB < EMBLDB
       hsh = Hash.new
       tmp.each do |e|
         db,refs = e.split(/=/)
-        hsh[db] = refs.split(/, */)
+        hsh[db] = split_outside_evidence_tag(refs)
+        evidence = evidence_tags_in(refs)
+        hsh["#{db}_Evidence"] = evidence unless evidence.empty?
       end
       @data['OX'] = hsh
     end
@@ -600,6 +675,8 @@ class UniProtKB < EMBLDB
           end
         end
 
+        rn_evidence = evidence_tags_in(hash['RN'])
+        hash['RN_Evidence'] = rn_evidence unless rn_evidence.empty?
         hash['RN'] = set_RN(hash['RN'])
         hash['RC'] = set_RC(hash['RC'])
         hash['RP'] = set_RP(hash['RP'])
@@ -617,13 +694,20 @@ class UniProtKB < EMBLDB
   end
 
   def set_RN(data)
-    data.strip
+    strip_evidence_tag(data.strip)
   end
 
   def set_RC(data)
-    data.scan(/([STP]\w+)=(.+);/).map { |comment|
-      [comment[1].split(/, and |, /)].flatten.map { |text|
-        {'Token' => comment[0], 'Text' => text}
+    # NOTE: "(.+?)" (non-greedy) is required, instead of "(.+)", to
+    # correctly handle RC lines with two or more tokens, such as
+    # "STRAIN=xxx; PLASMID=yyy;". With a greedy match, the value of
+    # the first token would swallow all of the following tokens.
+    data.scan(/([STP]\w+)=(.+?);/).map { |comment|
+      [comment[1].split(/,\s+(?:and\s+)?(?![^{]*\})/)].flatten.map { |text|
+        hash = {'Token' => comment[0], 'Text' => strip_evidence_tag(text.strip)}
+        evidence = evidence_tags_in(text)
+        hash['Evidence'] = evidence unless evidence.empty?
+        hash
       }
     }.flatten
   end
@@ -743,9 +827,10 @@ class UniProtKB < EMBLDB
                  'POLYMORPHISM',
                  'BIOPHYSICOCHEMICAL PROPERTIES',
                  'MASS SPECTROMETRY',
-                 'WEB RESOURCE', 
-                 'ENZYME REGULATION',
+                 'WEB RESOURCE',
+                 'ACTIVITY REGULATION', # renamed from 'ENZYME REGULATION'
                  'DISEASE',
+                 'DISRUPTION PHENOTYPE',
                  'INTERACTION',
                  'DEVELOPMENTAL STAGE',
                  'INDUCTION',
@@ -759,6 +844,7 @@ class UniProtKB < EMBLDB
                  'PATHWAY',
                  'SUBUNIT',
                  'CATALYTIC ACTIVITY',
+                 'SEQUENCE CAUTION',
                  'SUBCELLULAR LOCATION',
                  'FUNCTION',
                  'SIMILARITY']
@@ -865,7 +951,7 @@ class UniProtKB < EMBLDB
       return cc_biophysiochemical_properties(@data['CC'][topic])
     when 'BIOTECHNOLOGY'
       return @data['CC'][topic]
-    when 'CATALITIC ACTIVITY'
+    when 'CATALYTIC ACTIVITY'
       return cc_catalytic_activity(@data['CC'][topic])
     when 'CAUTION'
       return cc_caution(@data['CC'][topic])
@@ -875,9 +961,13 @@ class UniProtKB < EMBLDB
       return @data['CC'][topic].join('')
     when 'DISEASE'
       return @data['CC'][topic].join('')
+    when 'DISRUPTION PHENOTYPE'
+      return @data['CC'][topic].join('')
     when 'DOMAIN'
       return @data['CC'][topic]
-    when 'ENZYME REGULATION'
+    when 'ENZYME REGULATION', 'ACTIVITY REGULATION'
+      # Renamed from "ENZYME REGULATION" to "ACTIVITY REGULATION" in
+      # UniProtKB; both topic names are accepted for backward compatibility.
       return @data['CC'][topic].join('')
     when 'FUNCTION'
       return @data['CC'][topic].join('')
@@ -899,6 +989,8 @@ class UniProtKB < EMBLDB
       return @data['CC'][topic]
     when 'RNA EDITING'
       return cc_rna_editing(@data['CC'][topic])
+    when 'SEQUENCE CAUTION'
+      return cc_sequence_caution(@data['CC'][topic])
     when 'SIMILARITY'
       return @data['CC'][topic]
     when 'SUBCELLULAR LOCATION'
@@ -1024,6 +1116,42 @@ class UniProtKB < EMBLDB
   private :cc_caution
 
 
+  # returns contents in the CC CATALYTIC ACTIVITY section.
+  #
+  #   CC   -!- CATALYTIC ACTIVITY:
+  #   CC       Reaction=a + b = c + d; Xref=Rhea:RHEA:12345, ChEBI:CHEBI:1,
+  #   CC         ChEBI:CHEBI:2; EC=1.2.3.4; Evidence={ECO:0000255};
+  #   CC       PhysiologicalDirection=left-to-right; Xref=Rhea:RHEA:12346;
+  #
+  # Returns an Array of Hash:
+  #    [{'Reaction' => str, 'Xref' => [str, ...], 'EC' => str,
+  #      'Evidence' => [[eco_code, source_or_nil], ...],
+  #      'PhysiologicalDirection' => str}, ...]
+  def cc_catalytic_activity(data)
+    return nil unless data
+    data.map { |elem|
+      entry = {'Reaction' => nil, 'Xref' => [], 'EC' => nil,
+               'Evidence' => nil, 'PhysiologicalDirection' => nil}
+      elem.scan(/([A-Za-z]+)=(.+?);/).each do |key, val|
+        case key
+        when 'Reaction'
+          entry['Reaction'] = val
+        when 'Xref'
+          entry['Xref'].concat(val.split(/,\s*/))
+        when 'EC'
+          entry['EC'] = val
+        when 'Evidence'
+          entry['Evidence'] = evidence_tags_in(val)
+        when 'PhysiologicalDirection'
+          entry['PhysiologicalDirection'] = val
+        end
+      end
+      entry
+    }
+  end
+  private :cc_catalytic_activity
+
+
   # returns conteins in a line of the CC INTERACTION section.
   #
   #   CC       P46527:CDKN1B; NbExp=1; IntAct=EBI-359815, EBI-519280;
@@ -1107,6 +1235,41 @@ class UniProtKB < EMBLDB
     entry
   end
   private :cc_rna_editing
+
+
+  # returns contents in the CC SEQUENCE CAUTION section.
+  #
+  #   CC   -!- SEQUENCE CAUTION:
+  #   CC       Sequence=AAN10183.1; Type=Erroneous initiation;
+  #   CC         Note=Extended N-terminus.; Evidence={ECO:0000305};
+  #   CC       Sequence=AAN27996.1; Type=Erroneous gene model prediction;
+  #   CC         Evidence={ECO:0000305};
+  #
+  # Note that a single "-!- SEQUENCE CAUTION:" block may contain two or
+  # more "Sequence=...;" entries, as shown above.
+  #
+  # Returns an Array of Hash:
+  #    [{'Sequence' => str, 'Type' => str, 'Note' => str,
+  #      'Evidence' => [[eco_code, source_or_nil], ...]}, ...]
+  def cc_sequence_caution(data)
+    return nil unless data
+    data.map { |elem|
+      elem.scan(/Sequence=(.+?);(.*?)(?=Sequence=|\z)/).map { |seq, rest|
+        entry = {'Sequence' => seq, 'Type' => nil, 'Note' => nil,
+                 'Evidence' => nil}
+        rest.scan(/([A-Za-z]+)=(.+?);/).each do |key, val|
+          case key
+          when 'Evidence'
+            entry['Evidence'] = evidence_tags_in(val)
+          when 'Type', 'Note'
+            entry[key] = val
+          end
+        end
+        entry
+      }
+    }.flatten
+  end
+  private :cc_sequence_caution
 
 
   def cc_subcellular_location(data)

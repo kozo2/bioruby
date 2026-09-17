@@ -153,6 +153,19 @@ class EMBL < EMBLDB
   # "AC   A12345; B23456;"
 
 
+  # returns the BioProject identifier(s) in the PR (project) line, as
+  # an Array of String. Returns an empty Array if the entry has no PR
+  # line (the PR line does not exist in older entries).
+  #
+  # PR Line; project identifier (0 or 1 per entry)
+  #  PR   Project:PRJEB1159;
+  def pr
+    field_fetch('PR').split(/;\s*/).map { |x| x.sub(/\AProject:/, '').strip }
+                                   .reject(&:empty?)
+  end
+  alias project pr
+
+
   # returns the version information in the sequence version (SV) line.
   # * Bio::EMBL#sv -> Accession.Version in String
   # * Bio::EMBL#version -> accession in Int
@@ -448,6 +461,22 @@ class EMBL < EMBLDB
   end
   alias naseq seq
   alias ntseq seq
+
+  # CO -- Returns contents of the CO (contig/construction) line as a
+  # String. Note that CON-division entries (e.g. chromosome-level
+  # assemblies constructed by joining other entries, such as WGS
+  # scaffolds) do not embed the sequence itself in an SQ/sequence
+  # record, and instead describe it as a join of other entries in a
+  # CO record; in this case, sq/seq return an empty sequence while co
+  # returns the assembly instruction string (e.g.
+  # "join(BX000000.1:1..1000,gap(100),BX000001.1:1..2000)"). Entries
+  # without a CO line return an empty String.
+  #
+  # CO Line; contig/construction information (>=0 per entry)
+  def co
+    field_fetch('CO')
+  end
+  alias contig co
 
   #--
   # // Line; termination line (end; 1/entry)
