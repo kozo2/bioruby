@@ -1,0 +1,67 @@
+#
+# Generate SimpleCov HTML and publish it to GitHub Pages.
+#
+# GitHub Pages must use "GitHub Actions" as the publishing source
+# (Settings > Pages). The site URL is:
+#   https://<owner>.github.io/<repository>/
+
+name: Coverage
+
+on:
+  push:
+    branches: [ "master", "incoming" ]
+  pull_request:
+    branches: [ "master", "incoming" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: ruby/setup-ruby@v1
+      with:
+        ruby-version: '3.3'
+        bundler-cache: true
+    - name: Run tests with SimpleCov
+      run: bundle exec rake
+    - name: Check SimpleCov HTML output
+      run: test -f coverage/index.html
+    - name: Prepare GitHub Pages
+      run: touch coverage/.nojekyll
+    - name: Upload SimpleCov HTML artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: simplecov-report
+        path: coverage
+        if-no-files-found: error
+    - name: Setup Pages
+      if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+      uses: actions/configure-pages@v5
+    - name: Upload GitHub Pages artifact
+      if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+      uses: actions/upload-pages-artifact@v3
+      with:
+        path: coverage
+
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: coverage
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+    - name: Deploy to GitHub Pages
+      id: deployment
+      uses: actions/deploy-pages@v5

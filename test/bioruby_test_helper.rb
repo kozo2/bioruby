@@ -21,6 +21,8 @@ unless defined? BioRubyTestSimpleCov
       public_send(filter, '/sample/')
       public_send(filter, '/vendor/')
     end
+    # Always emit the HTML report used by GitHub Pages.
+    SimpleCov.formatter = SimpleCov::Formatter::HTMLFormatter if defined?(SimpleCov::Formatter::HTMLFormatter)
   rescue LoadError
     # SimpleCov is not available. Continue without coverage.
   end

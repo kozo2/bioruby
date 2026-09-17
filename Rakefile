@@ -61,6 +61,9 @@ Rake::TestTask.new do |t|
   t.test_files = FileList["test/network/**/test_*.rb"]
 end
 
+desc "Run tests and generate SimpleCov HTML in coverage/"
+task :coverage => :test
+
 # files not included in gem but included in tar archive
 tar_additional_files = []
 

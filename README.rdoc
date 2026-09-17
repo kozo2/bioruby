@@ -187,6 +187,15 @@ Open the HTML report in a web browser:
 The machine-readable results are also written to coverage/.resultset.json.
 If simplecov is not installed, the tests run normally without coverage.
 
+GitHub Actions also generates the HTML report.  Every workflow run uploads
+the coverage/ directory as an artifact named +simplecov-report+.  On the
+default branch, the same report is published to GitHub Pages:
+
+  https://kozo2.github.io/bioruby/
+
+Set the Pages publishing source to "GitHub Actions" in the repository
+Settings > Pages.  The workflow is .github/workflows/coverage.yml.
+
 
 == SETUP
 
